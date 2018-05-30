@@ -5,7 +5,7 @@ import torch
 
 class ConvLSTMCell(nn.Module):
 
-    def __init__(self, input_size, input_dim, hidden_dim, kernel_size, bias):
+    def __init__(self, input_size, input_dim, hidden_dim, kernel_size, bias, device):
         """
         Initialize ConvLSTM cell.
         
@@ -32,6 +32,8 @@ class ConvLSTMCell(nn.Module):
         self.kernel_size = kernel_size
         self.padding     = kernel_size[0] // 2, kernel_size[1] // 2
         self.bias        = bias
+
+        self.device      = device
         
         self.conv = nn.Conv2d(in_channels=self.input_dim + self.hidden_dim,
                               out_channels=4 * self.hidden_dim,
@@ -58,13 +60,13 @@ class ConvLSTMCell(nn.Module):
         return h_next, c_next
 
     def init_hidden(self, batch_size):
-        return (Variable(torch.zeros(batch_size, self.hidden_dim, self.height, self.width)).cuda(),
-                Variable(torch.zeros(batch_size, self.hidden_dim, self.height, self.width)).cuda())
+        return (torch.zeros([batch_size, self.hidden_dim, self.height, self.width], requires_grad=True).to(self.device),
+                torch.zeros([batch_size, self.hidden_dim, self.height, self.width], requires_grad=True).to(self.device))
 
 
 class ConvLSTM(nn.Module):
 
-    def __init__(self, input_size, input_dim, hidden_dim, kernel_size, num_layers,
+    def __init__(self, input_size, input_dim, hidden_dim, kernel_size, num_layers, device,
                  batch_first=False, bias=True, return_all_layers=False):
         super(ConvLSTM, self).__init__()
 
@@ -86,6 +88,8 @@ class ConvLSTM(nn.Module):
         self.bias = bias
         self.return_all_layers = return_all_layers
 
+        self.device = device
+
         cell_list = []
         for i in range(0, self.num_layers):
             cur_input_dim = self.input_dim if i == 0 else self.hidden_dim[i-1]
@@ -94,7 +98,8 @@ class ConvLSTM(nn.Module):
                                           input_dim=cur_input_dim,
                                           hidden_dim=self.hidden_dim[i],
                                           kernel_size=self.kernel_size[i],
-                                          bias=self.bias))
+                                          bias=self.bias,
+					  device=self.device))
 
         self.cell_list = nn.ModuleList(cell_list)
 
