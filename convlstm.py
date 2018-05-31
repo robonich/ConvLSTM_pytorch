@@ -36,6 +36,8 @@ class ConvLSTMCell(nn.Module):
         self.device      = device
         
         self.conv = nn.Conv2d(in_channels=self.input_dim + self.hidden_dim,
+                              # ここで 4 * self.hidden_dim にしているのは後にこれを4等分してcombined_convに分けるから
+                              # 理解した
                               out_channels=4 * self.hidden_dim,
                               kernel_size=self.kernel_size,
                               padding=self.padding,
@@ -47,8 +49,13 @@ class ConvLSTMCell(nn.Module):
         
         combined = torch.cat([input_tensor, h_cur], dim=1)  # concatenate along channel axis
         
+        # combined_conv の self.hidden_dim * 4 のサイズを持っている
         combined_conv = self.conv(combined)
-        cc_i, cc_f, cc_o, cc_g = torch.split(combined_conv, self.hidden_dim, dim=1) 
+
+        # ここの split で sigmoid や tanh に入力する前の畳み込んである状態の値にすることができた
+        # cc は combined_conv
+        cc_i, cc_f, cc_o, cc_g = torch.split(combined_conv, self.hidden_dim, dim=1)
+        
         i = torch.sigmoid(cc_i)
         f = torch.sigmoid(cc_f)
         o = torch.sigmoid(cc_o)
@@ -57,6 +64,7 @@ class ConvLSTMCell(nn.Module):
         c_next = f * c_cur + i * g
         h_next = o * torch.tanh(c_next)
         
+        # h_next, c_next の size は self.hidden_dim
         return h_next, c_next
 
     def init_hidden(self, batch_size):
@@ -99,7 +107,7 @@ class ConvLSTM(nn.Module):
                                           hidden_dim=self.hidden_dim[i],
                                           kernel_size=self.kernel_size[i],
                                           bias=self.bias,
-					  device=self.device))
+                                          device=self.device))
 
         self.cell_list = nn.ModuleList(cell_list)
 
