@@ -1,6 +1,7 @@
 import torch.nn as nn
 from torch.autograd import Variable
 import torch
+import torch.nn.functional as F
 
 
 class ConvLSTMCell(nn.Module):
@@ -74,8 +75,8 @@ class ConvLSTMCell(nn.Module):
 
 class ConvLSTM(nn.Module):
 
-    def __init__(self, input_size, input_dim, hidden_dim, kernel_size, num_layers, device,
-                 batch_first=False, bias=True, return_all_layers=False):
+    def __init__(self, input_size, input_dim, hidden_dim, kernel_size, num_layers, linear_dim, device,
+                 batch_first=False, bias=True, return_all_layers=False, use_all_t=False):
         super(ConvLSTM, self).__init__()
 
         self._check_kernel_size_consistency(kernel_size)
@@ -94,8 +95,14 @@ class ConvLSTM(nn.Module):
         self.num_layers = num_layers
         self.batch_first = batch_first
         self.bias = bias
+        # 最後の cell 以外のの output もすべて出すかどうか
         self.return_all_layers = return_all_layers
 
+        # 最後の linear 層をどうするか
+        self.linear_dim = linear_dim
+        # すべての t　を利用するか
+        self.use_all_t = use_all_t
+        
         self.device = device
 
         cell_list = []
@@ -110,10 +117,20 @@ class ConvLSTM(nn.Module):
                                           device=self.device))
 
         self.cell_list = nn.ModuleList(cell_list)
+        
+        linear_list = []
+        
+        for i in range(len(self.linear_dim)):
+            _t = 5 # これは予め決めておかないと（固定値）
+            if not self.use_all_t:
+                _t = 1
+            cur_input_dim = self.hidden_dim[-1] * _t * self.height * self.width if i == 0 else self.linear_dim[i-1]
+            linear_list.append(nn.Linear(cur_input_dim, self.linear_dim[i]))
+            
+        self.linear_list = nn.ModuleList(linear_list)
 
     def forward(self, input_tensor, hidden_state=None):
         """
-        
         Parameters
         ----------
         input_tensor: todo 
@@ -123,7 +140,7 @@ class ConvLSTM(nn.Module):
             
         Returns
         -------
-        last_state_list, layer_output
+        sigmoid で 0~1 の値にしたもの sig_valueを返す。
         """
         if not self.batch_first:
             # (t, b, c, h, w) -> (b, t, c, h, w)
@@ -138,19 +155,23 @@ class ConvLSTM(nn.Module):
         layer_output_list = []
         last_state_list   = []
 
+        # seq_len は time
         seq_len = input_tensor.size(1)
         cur_layer_input = input_tensor
 
         for layer_idx in range(self.num_layers):
 
+            # まずは h, c を tensor でちゃんと初期化してあげる（backpropするために）
             h, c = hidden_state[layer_idx]
             output_inner = []
             for t in range(seq_len):
-
                 h, c = self.cell_list[layer_idx](input_tensor=cur_layer_input[:, t, :, :, :],
                                                  cur_state=[h, c])
                 output_inner.append(h)
 
+            # 時間方向でスタックさせている
+            # ここで時間方向でスタックさせているのは何故？
+            # この時間をすべてを使うかどうかは自分次第、 use_all_t というフラグをおいてみよう
             layer_output = torch.stack(output_inner, dim=1)
             cur_layer_input = layer_output
 
@@ -160,8 +181,21 @@ class ConvLSTM(nn.Module):
         if not self.return_all_layers:
             layer_output_list = layer_output_list[-1:]
             last_state_list   = last_state_list[-1:]
+            
+        if not self.use_all_t:
+            # LSTM 最後の層の、最後の出力 h を次の Linear に入力する
+            # x は (batch_size, last_hidden_dim, height, width)
+            x = last_state_list[-1][0].view(-1, self.hidden_dim[-1] * self.height * self.width)
+        
+        # ここから linear 層
+        for layer_idx in range(len(self.linear_list)):
+            if layer_idx == len(self.linear_list)-1:
+                break
+            x = F.relu(self.linear_list[layer_idx](x))
+            
+        x = F.sigmoid(self.linear_list[-1](x))
 
-        return layer_output_list, last_state_list
+        return layer_output_list, last_state_list, x
 
     def _init_hidden(self, batch_size):
         init_states = []
