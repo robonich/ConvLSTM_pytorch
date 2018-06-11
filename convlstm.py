@@ -49,6 +49,7 @@ class ConvLSTMCell(nn.Module):
         h_cur, c_cur = cur_state
         
         combined = torch.cat([input_tensor, h_cur], dim=1)  # concatenate along channel axis
+        #print("combined", combined.requires_grad)
         
         # combined_conv の self.hidden_dim * 4 のサイズを持っている
         combined_conv = self.conv(combined)
@@ -56,6 +57,7 @@ class ConvLSTMCell(nn.Module):
         # ここの split で sigmoid や tanh に入力する前の畳み込んである状態の値にすることができた
         # cc は combined_conv
         cc_i, cc_f, cc_o, cc_g = torch.split(combined_conv, self.hidden_dim, dim=1)
+        #print("cc_i", cc_i.requires_grad)
         
         i = torch.sigmoid(cc_i)
         f = torch.sigmoid(cc_f)
@@ -163,6 +165,7 @@ class ConvLSTM(nn.Module):
 
             # まずは h, c を tensor でちゃんと初期化してあげる（backpropするために）
             h, c = hidden_state[layer_idx]
+            #print("h", h.requires_grad)
             output_inner = []
             for t in range(seq_len):
                 h, c = self.cell_list[layer_idx](input_tensor=cur_layer_input[:, t, :, :, :],
@@ -193,7 +196,8 @@ class ConvLSTM(nn.Module):
                 break
             x = F.relu(self.linear_list[layer_idx](x))
             
-        x = F.sigmoid(self.linear_list[-1](x))
+        # softmax に変更
+        x = F.softmax(self.linear_list[-1](x))
 
         return layer_output_list, last_state_list, x
 
